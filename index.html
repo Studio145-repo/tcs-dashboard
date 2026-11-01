@@ -62,6 +62,10 @@ h2{font-weight:700;font-size:28px;letter-spacing:-.025em;margin:0;display:flex;a
 h3{font-size:15px;font-weight:600;letter-spacing:-.01em;margin:0}
 .cap{font-size:13px;color:var(--mut);margin-top:3px}
 .tag{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:500;letter-spacing:.01em;padding:3px 9px;border-radius:99px;background:var(--hover);color:var(--mut);white-space:nowrap;vertical-align:middle}
+.tag.hold{background:rgba(255,149,0,.16);color:#c76a00}
+.hold-card{border-left:4px solid #ff9500;padding:18px 22px;margin-top:10px}
+.hold-card .t{font-weight:600}
+.hold-card p{margin:6px 0 0;color:var(--mut);font-size:14px}
 .tag.live{background:var(--acc-soft);color:var(--acc)}
 .tag.live::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor}
 h2 .tag{font-size:12px;font-weight:500;letter-spacing:0}
@@ -170,6 +174,12 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid var(--line);font-si
   <div class="status loading" id="statusWrap"><span class="dot"></span><span id="status">Loading live data from tracker…</span></div>
 </div>
 
+<!-- a2. Album holds -->
+<section id="holds-s" class="reveal" hidden>
+  <div class="sec-h"><h2>Album holds <span class="tag hold">posting hold</span><span class="tag live">live from tracker</span></h2></div>
+  <div id="holds"></div>
+</section>
+
 <!-- b. Reconciled totals -->
 <section id="totals-s" class="reveal">
   <div class="sec-h"><h2>Reconciled totals <span class="tag">snapshot Oct 31</span><span class="tag live">live from tracker</span></h2></div>
@@ -193,7 +203,7 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid var(--line);font-si
 <section id="pick-s" class="reveal">
   <div class="sec-h"><h2>Leonard's next pick <span class="tag">snapshot Oct 31</span></h2></div>
   <div class="card pick">
-    <div><div class="lbl">Recommended album</div><div class="pick-title">Murder Mystery Night + Sep 27th</div></div>
+    <div><div class="lbl">Recommended album</div><div class="pick-title">Murder Mystery Night + Sep 27th</div><div id="pickHold"></div></div>
     <div class="pick-stats">
       <div><div class="lbl">Clips</div><div class="v">10</div></div>
       <div><div class="lbl">Source</div><div class="v" style="font-size:20px;font-family:var(--mono);font-weight:400">IMG_8780</div></div>
@@ -353,7 +363,7 @@ function render(d){const {clip,alb,src,un}=d;const t=applyChartTheme()||theme(),
  // albums
  const A=alb.filter(a=>a['Source album']).map(a=>({album:a['Source album'],src:num(a['# source videos']),cut:num(a['# clips cut']),posted:num(a['# clips posted']),unposted:num(a['# clips cut'])-num(a['# clips posted']),posts:num(a['# posts']),views:num(a['Total views']),res:num(a['Avg Resonance Rate (views-weighted)']),top:a['Top source video']}));
  const maxResA=Math.max(0,...A.map(a=>a.res));
- table('tAlb',[{k:'album',l:'Album',cls:'strong wrap'},{k:'src',l:'Sources',n:1},{k:'cut',l:'Cut',n:1},{k:'posted',l:'Posted',n:1},{k:'unposted',l:'Unposted',n:1},{k:'views',l:'Views',n:1,f:fmt},{k:'res',l:'Res %',n:1,f:resCell(maxResA)},{k:'top',l:'Top source',cls:'file'}],A,'views','nAlb');
+ table('tAlb',[{k:'album',l:'Album',cls:'strong wrap',f:v=>HOLDS.has(normA(v))?`${esc(v)} <span class="tag hold">Posting hold · cut OK</span>`:esc(v)},{k:'src',l:'Sources',n:1},{k:'cut',l:'Cut',n:1},{k:'posted',l:'Posted',n:1},{k:'unposted',l:'Unposted',n:1},{k:'views',l:'Views',n:1,f:fmt},{k:'res',l:'Res %',n:1,f:resCell(maxResA)},{k:'top',l:'Top source',cls:'file'}],A,'views','nAlb');
  const top=[...A].sort((a,b)=>b.views-a.views).slice(0,12);
  chart('cAlb',{type:'bar',data:{labels:top.map(a=>a.album),datasets:[{label:'Views',data:top.map(a=>a.views),backgroundColor:acc,hoverBackgroundColor:'rgba(0,122,255,.8)',borderRadius:6,borderSkipped:false,barPercentage:.75,categoryPercentage:.9}]},options:{indexAxis:'y',maintainAspectRatio:false,scales:hbarScales(t),plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>' '+fmt(c.raw)+' views'}}}}});
  const tu=[...A].sort((a,b)=>b.unposted-a.unposted).slice(0,12);
@@ -388,6 +398,13 @@ function fail(){STATE='fail';$('status').textContent='Tracker unreachable, showi
  ['tAlb','tSrc','tPlat','tClips'].forEach(id=>$(id).innerHTML='<tbody><tr><td class="empty">Tracker unreachable. Live data is not available right now.</td></tr></tbody>');
  ['nAlb','nSrc','nClips'].forEach(id=>$(id).textContent='')}
 
+/* ---------- album posting holds (Albums tab: Posting column or POSTING HOLD in Notes) ---------- */
+let HOLDS=new Map();const normA=v=>String(v||'').trim().toLowerCase();
+async function loadHolds(){try{const rows=await tab('Albums');HOLDS=new Map();
+ rows.forEach(r=>{const post=(r.Posting||r['Post hold']||'').trim(),notes=r.Notes||'';if(/hold/i.test(post)||/^\s*POSTING HOLD/i.test(notes)){const m=notes.match(/POSTING HOLD:[^|]*/i);HOLDS.set(normA(r.Album),{album:r.Album,post:post||'HOLD - do not post or schedule',note:m?m[0].trim():'POSTING HOLD'})}});
+ const box=$('holds');box.innerHTML=[...HOLDS.values()].map(h=>`<div class="card hold-card"><div class="t">${esc(h.album)} <span class="tag hold">${esc(h.post)}</span></div><p>${esc(h.note)}</p></div>`).join('');$('holds-s').hidden=!HOLDS.size;
+ const ph=HOLDS.get(normA('Murder Mystery Night + Sep 27th'));$('pickHold').innerHTML=ph?`<div style="margin-top:10px"><span class="tag hold">Posting hold · cut OK</span></div><p class="note" style="margin-top:6px">${esc(ph.note)}</p>`:'';
+ }catch(e){console.error('holds',e)}}
 async function load(){try{if(!window.Chart)throw new Error('Chart.js failed to load');const [clip,alb,src,un]=await Promise.all(['Clip Log','Album Rollup','Source Videos','Posted - Unmatched'].map(tab));STATE='live';load.last={clip,alb,src,un};render(load.last)}catch(e){console.error(e);fail()}}
 
 /* ---------- boot ---------- */
@@ -395,7 +412,7 @@ renderTotals();renderAud();renderCounts();
 skeleton('tAlb',6,8);skeleton('tSrc',6,7);skeleton('tPlat',4,3);skeleton('tClips',8,9);
 const io='IntersectionObserver' in window?new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}}),{rootMargin:'0px 0px -8% 0px'}):null;
 document.querySelectorAll('.reveal').forEach(el=>io?io.observe(el):el.classList.add('in'));
-load();
+loadHolds().finally(load);
 </script>
 </body>
 </html>
