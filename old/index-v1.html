@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TCS Clip Albums Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+:root{--bg:#fbfbfd;--card:#fff;--fg:#1d1d1f;--mut:#86868b;--line:#e5e5ea;--acc:#007AFF;--sh:0 4px 24px rgba(0,0,0,.06)}
+.dark{--bg:#000;--card:#1c1c1e;--fg:#f5f5f7;--mut:#98989d;--line:#38383a;--sh:0 4px 24px rgba(0,0,0,.5)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"SF Pro Display",Helvetica,sans-serif;-webkit-font-smoothing:antialiased}
+main{max-width:1180px;margin:0 auto;padding:56px 24px 96px}
+h1{font-weight:600;font-size:40px;letter-spacing:-.02em;margin:0}h2{font-weight:600;font-size:22px;margin:56px 0 16px}
+.sub{color:var(--mut);margin-top:8px}.grid{display:grid;gap:20px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.card{background:var(--card);border-radius:20px;padding:24px;box-shadow:var(--sh)}
+.big{font-size:44px;font-weight:200;letter-spacing:-.02em;margin:6px 0}.lbl{color:var(--mut);font-size:13px}
+.tag{display:inline-block;font-size:11px;padding:3px 9px;border-radius:99px;border:1px solid var(--line);color:var(--mut);margin-left:6px;vertical-align:middle}
+.tag.live{color:var(--acc);border-color:var(--acc)}
+table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--line)}
+th{color:var(--mut);font-weight:500;cursor:pointer;user-select:none;position:sticky;top:0;background:var(--card)}td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+.scroll{max-height:560px;overflow:auto}a{color:var(--acc);text-decoration:none}
+button,input{font:inherit;border-radius:99px;border:1px solid var(--line);background:var(--card);color:var(--fg);padding:8px 16px}
+button{cursor:pointer}.top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+.note{font-size:13px;color:var(--mut);line-height:1.5}canvas{max-height:340px}
+</style></head><body><main>
+<div class="top"><div><h1>TCS Clip Albums</h1><div class="sub" id="status">Loading live data from tracker…</div></div><button id="mode">Dark mode</button></div>
+
+<h2>Reconciled totals <span class="tag">snapshot Oct 31</span> <span class="tag live">live from tracker</span></h2>
+<div class="grid" id="totals"></div>
+<p class="note">Reconciliation rule: unique post URLs from Clip Log + Posted - Unmatched, de-duplicated by post URL (Clip Log wins). Content Intelligence (Notion) can't be read from a public page, so the tracker is the live source. YouTube is a static value: 8,447 Shorts + 1,649 long-form (Oct 31 snapshot).</p>
+
+<h2>Audience</h2><div class="grid" id="aud"></div>
+
+<h2>Clips <span class="tag live">live from tracker</span></h2><div class="grid" id="counts"></div>
+
+<h2>Leonard's next pick <span class="tag">snapshot Oct 31</span></h2>
+<div class="card"><div class="big" style="font-size:30px">Murder Mystery Night + Sep 27th</div><div class="lbl">10 clips · source IMG_8780 · ~855K combined clip views</div></div>
+
+<h2>Albums <span class="tag live">live from tracker</span></h2>
+<div class="grid"><div class="card"><canvas id="cAlb"></canvas></div><div class="card"><canvas id="cPU"></canvas></div></div>
+<div class="card" style="margin-top:20px"><div class="scroll"><table id="tAlb"></table></div></div>
+
+<h2>Parent video rollup <span class="tag live">live from tracker</span></h2>
+<p class="note">Total views per long-form source video = sum of all its clips' views.</p>
+<div class="card"><div class="scroll"><table id="tSrc"></table></div></div>
+
+<h2>Platform split <span class="tag live">live from tracker</span></h2>
+<p class="note">Posted Clip Log clips grouped by which post links they carry. A multi-platform clip has one combined view number, so it gets its own group. This undercounts Instagram (most IG posts live in Posted - Unmatched) — use Reconciled totals for per-platform views.</p>
+<div class="grid"><div class="card"><canvas id="cPlat"></canvas></div><div class="card"><table id="tPlat"></table></div></div>
+
+<h2>Resonance <span class="tag live">live from tracker</span></h2><p class="note">Views-weighted average resonance rate.</p>
+<div class="grid"><div class="card"><canvas id="cResA"></canvas></div><div class="card"><canvas id="cResAcc"></canvas></div></div>
+
+<h2>Every posted clip <span class="tag live">live from tracker</span></h2>
+<input id="q" placeholder="Filter by album, file, account…" style="width:100%;max-width:420px;margin-bottom:16px">
+<div class="card"><div class="scroll"><table id="tClips"></table></div></div>
+<p class="note" style="margin-top:40px">Source: public TCS Clip Albums Tracker via Google gviz CSV, fetched on every load. No sign-in, no keys, no backend.</p>
+</main>
+<script>
+const SHEET='13TFBiaxGX2wyC-7PDjRMVjAiCHDA5NUCKArhrv8sGXg';
+const SNAP={ig:{v:15973355,p:1198},tt:{v:3748969,p:1229},yt:{v:10096,note:'8,447 Shorts + 1,649 long-form (static)'},total:19732420};
+const $=id=>document.getElementById(id),fmt=n=>Math.round(n).toLocaleString(),num=s=>{const x=parseFloat(String(s||'').replace(/,/g,''));return isNaN(x)?0:x};
+const short=n=>n>=1e6?(n/1e6).toFixed(2)+'M':n>=1e3?(n/1e3).toFixed(1)+'K':fmt(n);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function parseCSV(t){const r=[];let row=[],f='',q=false;for(let i=0;i<t.length;i++){const c=t[i];if(q){if(c=='"'){if(t[i+1]=='"'){f+='"';i++}else q=false}else f+=c}else if(c=='"')q=true;else if(c==','){row.push(f);f=''}else if(c=='\n'){row.push(f);r.push(row);row=[];f=''}else if(c!='\r')f+=c}if(f||row.length){row.push(f);r.push(row)}const h=r.shift()||[];return r.map(a=>Object.fromEntries(h.map((k,i)=>[k,a[i]??''])))}
+const tab=s=>fetch(`https://docs.google.com/spreadsheets/d/${SHEET}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent(s)}`).then(r=>{if(!r.ok)throw r.status;return r.text()}).then(parseCSV);
+const plat=u=>/instagram/.test(u)?'Instagram':/tiktok/.test(u)?'TikTok':/youtu/.test(u)?'YouTube':null;
+const norm=u=>u.trim().split('?')[0].replace(/\/$/,'');
+const links=s=>String(s||'').split('|').map(x=>x.trim()).filter(Boolean);
+const charts={};function chart(id,cfg){charts[id]?.destroy();charts[id]=new Chart($(id),cfg)}
+function table(id,cols,rows,sortKey){let key=sortKey,dir=-1;const el=$(id);function draw(){const rs=[...rows].sort((a,b)=>{const x=a[key],y=b[key];return(typeof x=='number'?x-y:String(x).localeCompare(String(y)))*dir});el.innerHTML='<thead><tr>'+cols.map(c=>`<th class="${c.n?'n':''}" data-k="${c.k}">${c.l}${c.k==key?(dir<0?' ↓':' ↑'):''}</th>`).join('')+'</tr></thead><tbody>'+rs.map(r=>'<tr>'+cols.map(c=>`<td class="${c.n?'n':''}">${c.f?c.f(r[c.k],r):esc(r[c.k])}</td>`).join('')+'</tr>').join('')+'</tbody>';el.querySelectorAll('th').forEach(th=>th.onclick=()=>{if(key==th.dataset.k)dir*=-1;else{key=th.dataset.k;dir=-1}draw()})}draw();return{set(r){rows=r;draw()}}}
+function card(l,v,s,tag){return `<div class="card"><div class="lbl">${l}${tag?` <span class="tag ${tag=='live'?'live':''}">${tag=='live'?'live from tracker':tag}</span>`:''}</div><div class="big">${v}</div><div class="lbl">${s||''}</div></div>`}
+function renderTotals(live){const L=live||{};let h='';
+ const tot=(L.ig?L.ig.v:SNAP.ig.v)+(L.tt?L.tt.v:SNAP.tt.v)+SNAP.yt.v;
+ h+=card('Total views',short(live?tot:SNAP.total),live?`snapshot ≈19.73M`:'',live?'live':'snapshot Oct 31');
+ h+=card('Instagram',short(SNAP.ig.v),`${fmt(SNAP.ig.v)} · ${fmt(SNAP.ig.p)} posts`,'snapshot Oct 31');
+ if(live)h+=card('Instagram',short(L.ig.v),`${fmt(L.ig.v)} · ${fmt(L.ig.p)} unique URLs`,'live');
+ h+=card('TikTok',short(SNAP.tt.v),`${fmt(SNAP.tt.v)} · ~${fmt(SNAP.tt.p)} posts`,'snapshot Oct 31');
+ if(live)h+=card('TikTok',short(L.tt.v),`${fmt(L.tt.v)} · ${fmt(L.tt.p)} unique URLs`,'live');
+ h+=card('YouTube',fmt(SNAP.yt.v),SNAP.yt.note,'static');$('totals').innerHTML=h}
+function renderAud(){$('aud').innerHTML=card('YouTube subscribers','126','As of Oct 26 · Welman\'s Monday report','static')+card('Instagram followers','—','Not sourced')+card('TikTok followers','—','Not sourced')}
+document.documentElement.classList.toggle('dark',localStorage.tcsDark==='1');
+$('mode').onclick=()=>{localStorage.tcsDark=document.documentElement.classList.toggle('dark')?'1':'0';load.last&&render(load.last)};
+renderTotals();renderAud();
+function render(d){const {clip,alb,src,un}=d;const css=getComputedStyle(document.documentElement),fg=css.getPropertyValue('--mut'),acc='#007AFF';Chart.defaults.color=fg;Chart.defaults.font.family='system-ui';Chart.defaults.borderColor=css.getPropertyValue('--line');
+ const posted=clip.filter(c=>/posted/i.test(c['Posted status']));
+ $('counts').innerHTML=card('Clips cut',fmt(clip.length))+card('Posted',fmt(posted.length))+card('Unposted',fmt(clip.length-posted.length))+card('Unmatched posts',fmt(un.length),'in Posted - Unmatched');
+ // reconciliation
+ const m=new Map();for(const c of clip){const ls=links(c['Post link(s)']);ls.forEach((l,i)=>{const k=norm(l);if(!m.has(k))m.set(k,i==0?num(c.Views):0)})}
+ for(const u of un){const k=norm(u['Post link']||'');if(k&&!m.has(k))m.set(k,num(u.Views))}
+ const R={ig:{v:0,p:0},tt:{v:0,p:0}};for(const[k,v]of m){const p=plat(k);const o=p=='Instagram'?R.ig:p=='TikTok'?R.tt:null;if(o){o.v+=v;o.p++}}renderTotals(R);
+ // albums
+ const A=alb.filter(a=>a['Source album']).map(a=>({album:a['Source album'],src:num(a['# source videos']),cut:num(a['# clips cut']),posted:num(a['# clips posted']),unposted:num(a['# clips cut'])-num(a['# clips posted']),posts:num(a['# posts']),views:num(a['Total views']),res:num(a['Avg Resonance Rate (views-weighted)']),top:a['Top source video']}));
+ table('tAlb',[{k:'album',l:'Album'},{k:'src',l:'Sources',n:1},{k:'cut',l:'Cut',n:1},{k:'posted',l:'Posted',n:1},{k:'unposted',l:'Unposted',n:1},{k:'views',l:'Views',n:1,f:fmt},{k:'res',l:'Res %',n:1},{k:'top',l:'Top source'}],A,'views');
+ const top=[...A].sort((a,b)=>b.views-a.views).slice(0,12);
+ chart('cAlb',{type:'bar',data:{labels:top.map(a=>a.album),datasets:[{label:'Views',data:top.map(a=>a.views),backgroundColor:acc,borderRadius:8}]},options:{indexAxis:'y',plugins:{legend:{display:false},title:{display:true,text:'Top albums by views'}}}});
+ const tu=[...A].sort((a,b)=>b.unposted-a.unposted).slice(0,12);
+ chart('cPU',{type:'bar',data:{labels:tu.map(a=>a.album),datasets:[{label:'Posted',data:tu.map(a=>a.posted),backgroundColor:acc,borderRadius:6},{label:'Unposted',data:tu.map(a=>a.unposted),backgroundColor:'rgba(0,122,255,.25)',borderRadius:6}]},options:{indexAxis:'y',scales:{x:{stacked:true},y:{stacked:true}},plugins:{title:{display:true,text:'Posted vs unposted (most unposted)'}}}});
+ // parent videos
+ const S=src.filter(s=>s['Source file']).map(s=>({album:s['Source album'],file:s['Source file'],cut:num(s['# clips cut']),posted:num(s['# clips posted']),posts:num(s['# posts']),views:num(s['Total views']),res:num(s['Avg Resonance Rate (views-weighted)']),acc:s.Accounts,top:s['Top clip (ID + views)']}));
+ table('tSrc',[{k:'file',l:'Parent video'},{k:'album',l:'Album'},{k:'posted',l:'Clips posted',n:1},{k:'posts',l:'Posts',n:1},{k:'views',l:'Total clip views',n:1,f:fmt},{k:'res',l:'Res %',n:1},{k:'acc',l:'Accounts'}],S,'views');
+ // platform split
+ const G={};for(const c of posted){const ps=[...new Set(links(c['Post link(s)']).map(plat).filter(Boolean))].sort((a,b)=>['TikTok','Instagram','YouTube'].indexOf(a)-['TikTok','Instagram','YouTube'].indexOf(b));const g=ps.length?ps.join(' + ')+(ps.length==1?' only':''):'No link';(G[g]??={g,clips:0,views:0});G[g].clips++;G[g].views+=num(c.Views)}
+ const P=Object.values(G).sort((a,b)=>b.views-a.views);
+ table('tPlat',[{k:'g',l:'Group'},{k:'clips',l:'Clips',n:1},{k:'views',l:'Views',n:1,f:fmt}],P,'views');
+ chart('cPlat',{type:'doughnut',data:{labels:P.map(p=>p.g),datasets:[{data:P.map(p=>p.views),backgroundColor:P.map((_,i)=>`rgba(0,122,255,${1-i*.14})`),borderWidth:0}]},options:{plugins:{legend:{position:'bottom'}}}});
+ // resonance
+ const wavg=(rows,keyf)=>{const o={};for(const r of rows){const v=num(r.Views),rr=num(r['Resonance Rate']);if(!v||!r['Resonance Rate'])continue;for(const k of keyf(r)){(o[k]??={w:0,v:0});o[k].w+=v*rr;o[k].v+=v}}return Object.entries(o).map(([k,x])=>({k,r:x.w/x.v,v:x.v})).sort((a,b)=>b.v-a.v)};
+ const rA=wavg(posted,r=>[r['Source album']]).slice(0,12),rC=wavg([...posted,...un],r=>(r['Account(s)']||r.Account||'').split(/[,|]/).map(s=>s.trim()).filter(Boolean));
+ const bar=(id,d,t)=>chart(id,{type:'bar',data:{labels:d.map(x=>x.k),datasets:[{label:'Resonance %',data:d.map(x=>+x.r.toFixed(2)),backgroundColor:acc,borderRadius:8}]},options:{plugins:{legend:{display:false},title:{display:true,text:t}}}});
+ bar('cResA',rA,'Resonance by album (top 12 by views)');bar('cResAcc',rC,'Resonance by account');
+ // clips
+ const C=posted.map(c=>({file:c.Filename,album:c['Source album'],src:c['Source file'],acc:c['Account(s)'],date:c['Post date(s)'],views:num(c.Views),res:num(c['Resonance Rate']),likes:num(c.Likes),links:c['Post link(s)']}));
+ const cols=[{k:'file',l:'Clip'},{k:'album',l:'Album'},{k:'src',l:'Parent'},{k:'acc',l:'Account(s)'},{k:'date',l:'Posted'},{k:'views',l:'Views',n:1,f:fmt},{k:'res',l:'Res %',n:1},{k:'likes',l:'Likes',n:1,f:fmt},{k:'links',l:'Links',f:v=>links(v).map(l=>`<a href="${esc(l)}" target="_blank" rel="noopener">${plat(l)||'link'}</a>`).join(' ')}];
+ const T=table('tClips',cols,C,'views');$('q').oninput=e=>{const q=e.target.value.toLowerCase();T.set(C.filter(c=>Object.values(c).join(' ').toLowerCase().includes(q)))};
+ $('status').textContent=`Live from tracker · loaded ${new Date().toLocaleString()}`}
+async function load(){try{const [clip,alb,src,un]=await Promise.all(['Clip Log','Album Rollup','Source Videos','Posted - Unmatched'].map(tab));load.last={clip,alb,src,un};render(load.last)}catch(e){$('status').textContent='Tracker unreachable — showing snapshot Oct 31 values only.';console.error(e)}}
+load();
+</script></body></html>
